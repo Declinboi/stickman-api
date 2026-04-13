@@ -8,6 +8,7 @@ import { VIDEO_PROCESSING_QUEUE, JobEvents } from './queue.constants';
 import { JobsService } from '../jobs/jobs.service';
 import { JobStatus } from '../entities/job.entity';
 import { VideoJobPayload } from './queue.producer';
+import { VideoGateway } from '../gateway/video.gateway';
 
 @Processor(VIDEO_PROCESSING_QUEUE)
 export class QueueConsumer extends WorkerHost {
@@ -17,6 +18,7 @@ export class QueueConsumer extends WorkerHost {
     private readonly jobsService: JobsService,
     private readonly httpService: HttpService,
     private readonly config: ConfigService,
+    private readonly videoGateway: VideoGateway, // ← injected
   ) {
     super();
   }
@@ -27,19 +29,26 @@ export class QueueConsumer extends WorkerHost {
     this.logger.log(`Processing job ${jobId} — ${originalFilename}`);
 
     try {
-      // 1. Mark job as processing in PostgreSQL
+      // 1. Mark as processing in PostgreSQL + emit via WebSocket
       await this.jobsService.updateStatus(jobId, JobStatus.PROCESSING, {
         progress: 0,
       });
+      this.videoGateway.emitJobProgress(jobId, 0);
 
-      // 2. Call the Python pose estimation service
+      // 2. Emit progress — downloading phase
+      this.videoGateway.emitJobProgress(jobId, 5);
+
       const pythonServiceUrl = this.config.get<string>(
         'PYTHON_SERVICE_URL',
         'http://localhost:8000',
       );
 
-      this.logger.log(`Calling Python service at ${pythonServiceUrl}`);
+      // 3. Emit progress — processing started
+      this.videoGateway.emitJobProgress(jobId, 10);
 
+      this.logger.log(`Calling Python service for job ${jobId}`);
+
+      // 4. Call Python service — this is the long-running step
       const response = await firstValueFrom(
         this.httpService.post(
           `${pythonServiceUrl}/process`,
@@ -48,42 +57,52 @@ export class QueueConsumer extends WorkerHost {
             input_video_url: inputVideoUrl,
           },
           {
-            timeout: 10 * 60 * 1000, // 10 minute timeout for long videos
+            timeout: 10 * 60 * 1000,
           },
         ),
       );
 
+      // 5. Emit near-complete progress before final save
+      this.videoGateway.emitJobProgress(jobId, 95);
+
       const { output_video_url } = response.data;
 
-      // 3. Mark job as completed with output URL
+      // 6. Mark as completed in PostgreSQL
       await this.jobsService.updateStatus(jobId, JobStatus.COMPLETED, {
         progress: 100,
         outputVideoUrl: output_video_url,
       });
 
-      this.logger.log(`Job ${jobId} completed — output: ${output_video_url}`);
+      // 7. Emit completed event with output URL
+      this.videoGateway.emitJobCompleted(jobId, output_video_url);
+
+      this.logger.log(`Job ${jobId} completed — ${output_video_url}`);
     } catch (error) {
       this.logger.error(`Job ${jobId} failed`, error);
 
-      // Mark job as failed with error message
+      const errorMessage =
+        error?.response?.data?.detail ?? error.message ?? 'Processing failed';
+
+      // Update DB
       await this.jobsService.updateStatus(jobId, JobStatus.FAILED, {
-        errorMessage:
-          error?.response?.data?.detail ?? error.message ?? 'Processing failed',
+        errorMessage,
       });
 
-      // Re-throw so BullMQ knows the job failed and can retry
+      // Emit failure to frontend
+      this.videoGateway.emitJobFailed(jobId, errorMessage);
+
       throw error;
     }
   }
 
   @OnWorkerEvent('active')
   onActive(job: Job) {
-    this.logger.log(`Job ${job.id} started processing`);
+    this.logger.log(`Job ${job.id} is now active`);
   }
 
   @OnWorkerEvent('completed')
   onCompleted(job: Job) {
-    this.logger.log(`Job ${job.id} completed successfully`);
+    this.logger.log(`Job ${job.id} completed`);
   }
 
   @OnWorkerEvent('failed')

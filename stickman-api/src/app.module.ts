@@ -7,6 +7,8 @@ import { UsersModule } from './users/users.module';
 import { UploadModule } from './upload/upload.module';
 import { JobsModule } from './jobs/jobs.module';
 import { QueueModule } from './queue/queue.module';
+import { GatewayModule } from './gateway/gateway.module';
+import { DownloadModule } from './download/download.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { QueueModule } from './queue/queue.module';
     JobsModule,
     UploadModule,
     QueueModule,
+    GatewayModule,
+    DownloadModule,
   ],
 })
 export class AppModule {}

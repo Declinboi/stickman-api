@@ -6,6 +6,7 @@ import { QueueProducer } from './queue.producer';
 import { QueueConsumer } from './queue.consumer';
 import { VIDEO_PROCESSING_QUEUE } from './queue.constants';
 import { JobsModule } from '../jobs/jobs.module';
+import { GatewayModule } from 'src/gateway/gateway.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { JobsModule } from '../jobs/jobs.module';
 
     HttpModule, // for calling the Python service
     JobsModule,
+    GatewayModule,
   ],
   providers: [QueueProducer, QueueConsumer],
   exports: [QueueProducer],
