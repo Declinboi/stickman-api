@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-
-# MediaPipe pose landmark indices
+from pose_estimator import VISIBILITY_THRESHOLD
+# ── MediaPipe pose landmark indices ───────────────────────────────────────────
 NOSE           = 0
 LEFT_SHOULDER  = 11
 RIGHT_SHOULDER = 12
@@ -15,64 +15,62 @@ LEFT_KNEE      = 25
 RIGHT_KNEE     = 26
 LEFT_ANKLE     = 27
 RIGHT_ANKLE    = 28
-
-# Connections that make up the stickman body
-STICK_CONNECTIONS = [
+# ── Connections that make up the stickman body ────────────────────────────────
+STICK_CONNECTIONS: list[tuple[int, int]] = [
     # Head to shoulders
-    (NOSE, LEFT_SHOULDER),
-    (NOSE, RIGHT_SHOULDER),
-    # Shoulders to elbows to wrists (arms)
+    (NOSE,           LEFT_SHOULDER),
+    (NOSE,           RIGHT_SHOULDER),
+    # Arms
     (LEFT_SHOULDER,  LEFT_ELBOW),
     (LEFT_ELBOW,     LEFT_WRIST),
     (RIGHT_SHOULDER, RIGHT_ELBOW),
     (RIGHT_ELBOW,    RIGHT_WRIST),
-    # Shoulders to hips (torso)
+    # Torso
     (LEFT_SHOULDER,  LEFT_HIP),
     (RIGHT_SHOULDER, RIGHT_HIP),
     (LEFT_HIP,       RIGHT_HIP),
     (LEFT_SHOULDER,  RIGHT_SHOULDER),
-    # Hips to knees to ankles (legs)
-    (LEFT_HIP,   LEFT_KNEE),
-    (LEFT_KNEE,  LEFT_ANKLE),
-    (RIGHT_HIP,  RIGHT_KNEE),
-    (RIGHT_KNEE, RIGHT_ANKLE),
+    # Legs
+    (LEFT_HIP,       LEFT_KNEE),
+    (LEFT_KNEE,      LEFT_ANKLE),
+    (RIGHT_HIP,      RIGHT_KNEE),
+    (RIGHT_KNEE,     RIGHT_ANKLE),
 ]
-
-STICK_COLOR = (255, 255, 255)  # white stickman
-BG_COLOR    = (0, 0, 0)        # black background
-HEAD_RADIUS = 18
+STICK_COLOR    = (255, 255, 255)   # white stickman
+BG_COLOR       = (0,   0,   0)    # black background
 LIMB_THICKNESS = 4
 JOINT_RADIUS   = 5
-
-
 class StickmanRenderer:
-    def __init__(self, width: int, height: int):
+    """
+    Renders a stickman figure onto a blank black canvas.
+    HEAD_RADIUS scales with frame height so the head looks proportional
+    across different resolutions (e.g. 360p vs 1080p).
+    """
+    def __init__(self, width: int, height: int) -> None:
         self.width  = width
         self.height = height
-
-    def render(self, landmarks: dict) -> np.ndarray:
+        # Scale head radius relative to frame height; clamp to [10, 30]
+        self.head_radius = max(10, min(30, height // 40))
+    def render(self, landmarks: dict[int, dict]) -> np.ndarray:
         """
         Draw a stickman on a blank black frame using the given landmarks.
-        Returns a BGR frame.
+        Returns a BGR frame (numpy array).
         """
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         frame[:] = BG_COLOR
-
         if not landmarks:
             return frame
-
-        # Draw limb connections
+        # ── Draw limb connections ─────────────────────────────────────────────
         for start_idx, end_idx in STICK_CONNECTIONS:
             start = landmarks.get(start_idx)
             end   = landmarks.get(end_idx)
-
             if not start or not end:
                 continue
-
-            # Skip low-confidence landmarks
-            if start["visibility"] < 0.3 or end["visibility"] < 0.3:
+            if (
+                start["visibility"] < VISIBILITY_THRESHOLD
+                or end["visibility"] < VISIBILITY_THRESHOLD
+            ):
                 continue
-
             cv2.line(
                 frame,
                 (start["x"], start["y"]),
@@ -81,10 +79,9 @@ class StickmanRenderer:
                 LIMB_THICKNESS,
                 lineType=cv2.LINE_AA,
             )
-
-        # Draw joint dots
-        for idx, lm in landmarks.items():
-            if lm["visibility"] < 0.3:
+        # ── Draw joint dots ───────────────────────────────────────────────────
+        for lm in landmarks.values():
+            if lm["visibility"] < VISIBILITY_THRESHOLD:
                 continue
             cv2.circle(
                 frame,
@@ -94,17 +91,15 @@ class StickmanRenderer:
                 -1,
                 lineType=cv2.LINE_AA,
             )
-
-        # Draw head circle around nose
+        # ── Draw head circle around nose ──────────────────────────────────────
         nose = landmarks.get(NOSE)
-        if nose and nose["visibility"] >= 0.3:
+        if nose and nose["visibility"] >= VISIBILITY_THRESHOLD:
             cv2.circle(
                 frame,
                 (nose["x"], nose["y"]),
-                HEAD_RADIUS,
+                self.head_radius,
                 STICK_COLOR,
                 LIMB_THICKNESS,
                 lineType=cv2.LINE_AA,
             )
-
         return frame
