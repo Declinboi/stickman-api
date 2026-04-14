@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from pose_estimator import VISIBILITY_THRESHOLD
-# ── MediaPipe pose landmark indices ───────────────────────────────────────────
+from pose_estimator import VISIBILITY_THRESHOLD, FIGHTER_COLORS
+
 NOSE           = 0
 LEFT_SHOULDER  = 11
 RIGHT_SHOULDER = 12
@@ -15,55 +15,75 @@ LEFT_KNEE      = 25
 RIGHT_KNEE     = 26
 LEFT_ANKLE     = 27
 RIGHT_ANKLE    = 28
-# ── Connections that make up the stickman body ────────────────────────────────
+
 STICK_CONNECTIONS: list[tuple[int, int]] = [
-    # Head to shoulders
     (NOSE,           LEFT_SHOULDER),
     (NOSE,           RIGHT_SHOULDER),
-    # Arms
     (LEFT_SHOULDER,  LEFT_ELBOW),
     (LEFT_ELBOW,     LEFT_WRIST),
     (RIGHT_SHOULDER, RIGHT_ELBOW),
     (RIGHT_ELBOW,    RIGHT_WRIST),
-    # Torso
     (LEFT_SHOULDER,  LEFT_HIP),
     (RIGHT_SHOULDER, RIGHT_HIP),
     (LEFT_HIP,       RIGHT_HIP),
     (LEFT_SHOULDER,  RIGHT_SHOULDER),
-    # Legs
     (LEFT_HIP,       LEFT_KNEE),
     (LEFT_KNEE,      LEFT_ANKLE),
     (RIGHT_HIP,      RIGHT_KNEE),
     (RIGHT_KNEE,     RIGHT_ANKLE),
 ]
-STICK_COLOR    = (255, 255, 255)   # white stickman
-BG_COLOR       = (0,   0,   0)    # black background
+
+BG_COLOR       = (0, 0, 0)
 LIMB_THICKNESS = 4
 JOINT_RADIUS   = 5
+
+
 class StickmanRenderer:
     """
-    Renders a stickman figure onto a blank black canvas.
-    HEAD_RADIUS scales with frame height so the head looks proportional
-    across different resolutions (e.g. 360p vs 1080p).
+    Renders multiple colored stickman fighters on a single black canvas.
+    Each fighter index maps to a unique color from FIGHTER_COLORS.
     """
+
     def __init__(self, width: int, height: int) -> None:
         self.width  = width
         self.height = height
-        # Scale head radius relative to frame height; clamp to [10, 30]
         self.head_radius = max(10, min(30, height // 40))
-    def render(self, landmarks: dict[int, dict]) -> np.ndarray:
+
+    def render_all(
+        self,
+        all_landmarks: list[dict[int, dict] | None],
+    ) -> np.ndarray:
         """
-        Draw a stickman on a blank black frame using the given landmarks.
-        Returns a BGR frame (numpy array).
+        Render all fighters onto a single black canvas.
+        Each fighter gets a unique color from FIGHTER_COLORS.
+        Returns a BGR frame.
         """
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         frame[:] = BG_COLOR
-        if not landmarks:
-            return frame
-        # ── Draw limb connections ─────────────────────────────────────────────
+
+        for fighter_idx, landmarks in enumerate(all_landmarks):
+            if not landmarks:
+                continue
+
+            color = FIGHTER_COLORS[fighter_idx % len(FIGHTER_COLORS)]
+            self._draw_fighter(frame, landmarks, color, fighter_idx + 1)
+
+        return frame
+
+    def _draw_fighter(
+        self,
+        frame: np.ndarray,
+        landmarks: dict[int, dict],
+        color: tuple[int, int, int],
+        fighter_number: int,
+    ) -> None:
+        """Draw a single colored stickman onto the frame."""
+
+        # ── Limbs ─────────────────────────────────────────────────────────────
         for start_idx, end_idx in STICK_CONNECTIONS:
             start = landmarks.get(start_idx)
             end   = landmarks.get(end_idx)
+
             if not start or not end:
                 continue
             if (
@@ -71,15 +91,17 @@ class StickmanRenderer:
                 or end["visibility"] < VISIBILITY_THRESHOLD
             ):
                 continue
+
             cv2.line(
                 frame,
                 (start["x"], start["y"]),
                 (end["x"],   end["y"]),
-                STICK_COLOR,
+                color,
                 LIMB_THICKNESS,
                 lineType=cv2.LINE_AA,
             )
-        # ── Draw joint dots ───────────────────────────────────────────────────
+
+        # ── Joints ────────────────────────────────────────────────────────────
         for lm in landmarks.values():
             if lm["visibility"] < VISIBILITY_THRESHOLD:
                 continue
@@ -87,19 +109,39 @@ class StickmanRenderer:
                 frame,
                 (lm["x"], lm["y"]),
                 JOINT_RADIUS,
-                STICK_COLOR,
+                color,
                 -1,
                 lineType=cv2.LINE_AA,
             )
-        # ── Draw head circle around nose ──────────────────────────────────────
+
+        # ── Head ──────────────────────────────────────────────────────────────
         nose = landmarks.get(NOSE)
         if nose and nose["visibility"] >= VISIBILITY_THRESHOLD:
             cv2.circle(
                 frame,
                 (nose["x"], nose["y"]),
                 self.head_radius,
-                STICK_COLOR,
+                color,
                 LIMB_THICKNESS,
                 lineType=cv2.LINE_AA,
             )
-        return frame
+
+        # ── Fighter number label ───────────────────────────────────────────────
+        # Small colored label above the head so fighters are clearly identified
+        if nose and nose["visibility"] >= VISIBILITY_THRESHOLD:
+            label_x = nose["x"] - 8
+            label_y = nose["y"] - self.head_radius - 8
+            cv2.putText(
+                frame,
+                f"P{fighter_number}",
+                (label_x, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+
+    # Backward-compatible single render
+    def render(self, landmarks: dict[int, dict]) -> np.ndarray:
+        return self.render_all([landmarks])

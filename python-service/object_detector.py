@@ -6,11 +6,11 @@ logger = logging.getLogger(__name__)
 
 # YOLO class names we care about — maps COCO label → effect type
 WEAPON_CLASSES = {
-    "knife":        "sword",
-    "scissors":     "sword",
+    "knife": "sword",
+    "scissors": "sword",
     "baseball bat": "sword",
-    "sports ball":  "punch",
-    "bottle":       "sword",
+    "sports ball": "punch",
+    "bottle": "sword",
 }
 
 # Any detected person interaction within this pixel distance
@@ -67,12 +67,14 @@ class ObjectDetector:
                     continue
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-                result["weapons"].append({
-                    "type": effect_type,
-                    "bbox": (x1, y1, x2, y2),
-                    "conf": conf,
-                    "label": cls_name,
-                })
+                result["weapons"].append(
+                    {
+                        "type": effect_type,
+                        "bbox": (x1, y1, x2, y2),
+                        "conf": conf,
+                        "label": cls_name,
+                    }
+                )
 
                 if effect_type == "sword":
                     result["has_sword"] = True
