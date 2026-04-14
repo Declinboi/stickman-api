@@ -126,17 +126,21 @@ class StickmanRenderer:
     - Smooth camera interpolation to avoid jarring jumps
     """
 
-    def __init__(self, width: int, height: int, zoom: float = 0.55) -> None:
+    def __init__(self, width: int, height: int, zoom: float = 0.4) -> None:
         self.width = width
         self.height = height
         self.scale = height
-        self.zoom = zoom  # base zoom level — lower = further away
 
-        # Smoothed camera state (interpolated each frame)
+        # Base zoom (lower = further away)
+        self.zoom = zoom
+
+        # Smoothed camera state
         self._smooth_ox: float = 0.0
         self._smooth_oy: float = 0.0
         self._smooth_zoom: float = zoom
-        self._smoothing: float = 0.08  # 0=no smoothing, 1=instant snap
+
+        # Lower = smoother, more cinematic
+        self._smoothing: float = 0.05
 
     def _apply_camera(
         self,
@@ -145,30 +149,30 @@ class StickmanRenderer:
         offset_x: float,
         offset_y: float,
     ) -> dict[int, dict]:
-        """Scale landmarks toward center and apply pan offset."""
         cx, cy = self.width // 2, self.height // 2
         result = {}
+
         for idx, lm in landmarks.items():
             result[idx] = {
                 "x": int(cx + (lm["x"] - cx) * zoom + offset_x),
                 "y": int(cy + (lm["y"] - cy) * zoom + offset_y),
                 "visibility": lm["visibility"],
             }
+
         return result
 
     def _compute_dynamic_camera(
         self,
         all_landmarks: list,
-        padding: float = 0.3,
+        padding: float = 0.5,  # MORE SPACE around fighters
     ) -> tuple[float, float, float]:
-        """
-        Compute zoom + pan to keep all fighters centered and fully visible.
-        Returns (zoom, offset_x, offset_y).
-        """
+
         all_x, all_y = [], []
+
         for landmarks in all_landmarks:
             if not landmarks:
                 continue
+
             for lm in landmarks.values():
                 if lm["visibility"] >= VISIBILITY_THRESHOLD:
                     all_x.append(lm["x"])
@@ -180,24 +184,30 @@ class StickmanRenderer:
         min_x, max_x = min(all_x), max(all_x)
         min_y, max_y = min(all_y), max(all_y)
 
-        # Center of all detected landmarks
         center_x = (min_x + max_x) / 2
         center_y = (min_y + max_y) / 2
 
-        # How much of the canvas the fighters currently span
         span_x = max_x - min_x
         span_y = max_y - min_y
 
-        # Compute zoom so fighters fit within canvas with padding
         if span_x > 0 and span_y > 0:
             zoom_x = (self.width * (1.0 - padding)) / max(span_x, 1)
             zoom_y = (self.height * (1.0 - padding)) / max(span_y, 1)
-            target_zoom = min(zoom_x, zoom_y, self.zoom)  # never zoom IN past base
+
+            # Base fit zoom
+            target_zoom = min(zoom_x, zoom_y)
+
+            # 🔥 FORCE camera to be further away
+            target_zoom *= 0.3
+
+            # 🔒 Prevent zooming too close
+            target_zoom = max(0.25, target_zoom)
+
         else:
             target_zoom = self.zoom
 
-        # Pan offset to center the fighters
         cx, cy = self.width / 2, self.height / 2
+
         target_ox = cx - center_x * target_zoom
         target_oy = cy - center_y * target_zoom
 
@@ -209,37 +219,38 @@ class StickmanRenderer:
         target_ox: float,
         target_oy: float,
     ) -> tuple[float, float, float]:
-        """
-        Lerp current camera state toward target for smooth movement.
-        Returns smoothed (zoom, offset_x, offset_y).
-        """
+
         s = self._smoothing
+
         self._smooth_zoom += (target_zoom - self._smooth_zoom) * s
         self._smooth_ox += (target_ox - self._smooth_ox) * s
         self._smooth_oy += (target_oy - self._smooth_oy) * s
+
         return self._smooth_zoom, self._smooth_ox, self._smooth_oy
 
     def render_all(
         self,
         all_landmarks: list[dict[int, dict] | None],
     ) -> np.ndarray:
+
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         frame[:] = BG_COLOR
 
-        # Compute where camera should be this frame
         target_zoom, target_ox, target_oy = self._compute_dynamic_camera(all_landmarks)
-
-        # Smooth the camera movement
         zoom, ox, oy = self._update_smooth_camera(target_zoom, target_ox, target_oy)
 
         for fighter_idx, landmarks in enumerate(all_landmarks):
             if not landmarks:
                 continue
+
             color = FIGHTER_COLORS[fighter_idx % len(FIGHTER_COLORS)]
             scaled = self._apply_camera(landmarks, zoom, ox, oy)
             self._draw_fighter(frame, scaled, color, fighter_idx + 1)
 
         return frame
+
+    # def render(self, landmarks: dict[int, dict]) -> np.ndarray:
+    #     return self.render_all([landmarks])
 
     def _draw_fighter(
         self,
