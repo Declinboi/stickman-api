@@ -1,21 +1,26 @@
-import { Controller, Get, Param, Request } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Request,
+  UseGuards,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JobsService } from './jobs.service';
 
 @Controller('jobs')
+@UseGuards(JwtAuthGuard) // protect all routes in this controller
 export class JobsController {
   constructor(private readonly jobsService: JobsService) {}
 
-  // GET /jobs — get all jobs for the logged-in user
   @Get()
   findAll(@Request() req) {
-    const userId = req.user?.id ?? 'temp-user-id'; // replace with real auth later
-    return this.jobsService.findAllByUser(userId);
+    return this.jobsService.findAllByUser(req.user.id);
   }
 
-  // GET /jobs/:id — get a single job status
   @Get(':id')
   findOne(@Param('id') id: string, @Request() req) {
-    const userId = req.user?.id ?? 'temp-user-id';
-    return this.jobsService.findOne(id, userId);
+    return this.jobsService.findOne(id, req.user.id);
   }
 }

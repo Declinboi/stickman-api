@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-50: #f0f4ff;
+  --color-primary-100: #e0e9ff;
+  --color-primary-400: #6b8cff;
+  --color-primary-500: #4f6ef7;
+  --color-primary-600: #3a56e8;
+  --color-primary-700: #2d44cc;
+  --color-primary-900: #1a2880;
+
+  --color-dark-400: #3d3d50;
+  --color-dark-900: #0a0a0f;
+  --color-dark-800: #111118;
+  --color-dark-700: #1a1a24;
+  --color-dark-600: #22222f;
+  --color-dark-500: #2d2d3d;
+
+  --animate-pulse-slow: pulse 3s ease-in-out infinite;
+  --animate-fade-in: fadeIn 0.4s ease-in-out;
+  --animate-slide-up: slideUp 0.4s ease-out;
+
+  --keyframes-fadeIn-0: {
+    opacity: 0;
+  };
+  --keyframes-fadeIn-100: {
+    opacity: 1;
+  };
+}
+
+@layer base {
+  body {
+    @apply bg-dark-900 text-white font-sans antialiased;
+  }
+
+  * {
+    @apply box-border;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-dark-800;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-dark-500 rounded-full;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-500 hover:bg-primary-600 text-white font-semibold
+           px-6 py-3 rounded-xl transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-dark-600 hover:bg-dark-500 text-white font-semibold
+           px-6 py-3 rounded-xl transition-all duration-200
+           border border-dark-500 hover:border-dark-400;
+  }
+
+  .card {
+    @apply bg-dark-800 border border-dark-600 rounded-2xl p-6;
+  }
+
+  .input {
+    @apply bg-dark-700 border border-dark-500 text-white rounded-xl
+           px-4 py-3 w-full focus:outline-none focus:border-primary-500
+           transition-colors duration-200 placeholder-gray-500;
+  }
+}
