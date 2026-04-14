@@ -2,12 +2,10 @@ import cv2
 import logging
 import tempfile
 import os
-import subprocess  # ← add this
+import subprocess
 from typing import Callable, Optional
-from pose_estimator import PoseEstimator, FIGHTER_COLORS
+from pose_estimator import PoseEstimator
 from stickman_renderer import StickmanRenderer
-from object_detector import ObjectDetector
-from effects_renderer import EffectsRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +26,6 @@ def _open_writer(
 
 
 def _remux_for_web(input_path: str, job_id: str) -> str:
-    """
-    Re-encode with FFmpeg to guarantee H.264 + AAC + faststart for browser playback.
-    Returns path to the remuxed file.
-    """
     output_path = input_path.replace(".mp4", f"-web-{job_id}.mp4")
     cmd = [
         "ffmpeg",
@@ -39,15 +33,15 @@ def _remux_for_web(input_path: str, job_id: str) -> str:
         "-i",
         input_path,
         "-c:v",
-        "libx264",  # H.264 — universally supported by browsers
+        "libx264",
         "-preset",
-        "fast",  # balance speed vs compression
+        "fast",
         "-crf",
-        "23",  # quality (18=best, 28=worst, 23=default)
+        "23",
         "-c:a",
-        "aac",  # AAC audio
+        "aac",
         "-movflags",
-        "+faststart",  # move metadata to front for streaming
+        "+faststart",
         output_path,
     ]
     logger.info("[%s] Re-encoding for web: %s", job_id, " ".join(cmd))
@@ -88,11 +82,7 @@ def process_video(
     output_tmp.close()
 
     writer = _open_writer(output_path, fps, width, height)
-    object_detector = ObjectDetector()
-    effects = EffectsRenderer()
     frame_count = 0
-    scene_has_sword = False
-    prev_all_landmarks: list[Optional[dict]] = [None, None]
 
     with PoseEstimator(max_people=2) as estimator:
         renderer = StickmanRenderer(width, height)
@@ -104,31 +94,8 @@ def process_video(
                     break
 
                 all_landmarks = estimator.estimate_all(frame)
-
-                if frame_count % 5 == 0:
-                    detection = object_detector.detect(frame)
-                    if detection["has_sword"]:
-                        scene_has_sword = True
-
                 stick_frame = renderer.render_all(all_landmarks)
-
-                for i, landmarks in enumerate(all_landmarks):
-                    if not landmarks:
-                        continue
-                    fighter_color = FIGHTER_COLORS[i % len(FIGHTER_COLORS)]
-                    prev = (
-                        prev_all_landmarks[i] if i < len(prev_all_landmarks) else None
-                    )
-                    effects.detect_and_trigger_sword(landmarks, scene_has_sword)
-                    if not scene_has_sword:
-                        effects.detect_and_trigger_punch_colored(
-                            landmarks, prev, fighter_color
-                        )
-                    effects.detect_and_trigger_fall(landmarks, prev)
-
-                stick_frame = effects.render(stick_frame)
                 writer.write(stick_frame)
-                prev_all_landmarks = list(all_landmarks)
                 frame_count += 1
 
                 if progress_callback and frame_count % 10 == 0:
@@ -144,12 +111,10 @@ def process_video(
 
     logger.info("[%s] OpenCV done — %d frames written", job_id, frame_count)
 
-    # ── Re-encode for browser compatibility ──────────────────────────────────
     web_path = _remux_for_web(output_path, job_id)
 
-    # Clean up the raw OpenCV output, keep only the web-ready file
     if os.path.exists(output_path):
         os.remove(output_path)
         logger.info("[%s] Cleaned up raw OpenCV temp file", job_id)
 
-    return web_path  # ← this is what gets uploaded to Cloudinary
+    return web_path
