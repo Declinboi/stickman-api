@@ -37,6 +37,20 @@ export const fetchJobById = createAsyncThunk(
   },
 );
 
+export const deleteJob = createAsyncThunk(
+  "jobs/delete",
+  async (id: string, { rejectWithValue }) => {
+    try {
+      await api.delete(`/jobs/${id}`);
+      return id;
+    } catch (err: any) {
+      return rejectWithValue(
+        err.response?.data?.message ?? "Failed to delete job",
+      );
+    }
+  },
+);
+
 const jobsSlice = createSlice({
   name: "jobs",
   initialState,
@@ -44,7 +58,6 @@ const jobsSlice = createSlice({
     clearCurrentJob(state) {
       state.currentJob = null;
     },
-    // Called by WebSocket events to update job in real time
     updateJobProgress(state, action) {
       const { jobId, progress, status } = action.payload;
       const job = state.jobs.find((j) => j.id === jobId);
@@ -112,6 +125,10 @@ const jobsSlice = createSlice({
       .addCase(fetchJobById.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
+      })
+      .addCase(deleteJob.fulfilled, (state, action) => {
+        state.jobs = state.jobs.filter((j) => j.id !== action.payload);
+        if (state.currentJob?.id === action.payload) state.currentJob = null;
       });
   },
 });

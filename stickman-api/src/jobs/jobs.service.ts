@@ -57,4 +57,10 @@ export class JobsService {
     if (!updated) throw new NotFoundException(`Job ${id} not found`);
     return updated;
   }
+
+  async deleteJob(id: string, userId: string): Promise<void> {
+    const job = await this.jobRepository.findOne({ where: { id, userId } });
+    if (!job) throw new NotFoundException(`Job ${id} not found`);
+    await this.jobRepository.delete(id);
+  }
 }
