@@ -76,7 +76,10 @@ export default function VideoUploader() {
       // Adjust depending on your API response shape:
       // If it's { job: {...} }  → use res.data.job
       // If it's the job directly → use res.data
-      const job = res.data.job ?? res.data;
+      const job = {
+        ...(res.data.job ?? res.data),
+        id: res.data.job?.id ?? res.data.id ?? res.data.jobId,
+      };
 
       if (!job?.id) {
         console.error("Upload response missing job ID:", res.data);
