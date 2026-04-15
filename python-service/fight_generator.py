@@ -83,23 +83,22 @@ def generate_fight(
 
     w, h = FRAME_W, FRAME_H
     floor_y = int(h * FLOOR_Y_R)
-    ground_y = floor_y - 10  # hip center rests here
+    ground_y = floor_y - 10
 
-    # ── 1. Choreography ────────────────────────────────────────────────────────
+    # ── 1. Choreography ───────────────────────────────────────────────────────
     choreographer = Choreographer(fps=FPS)
     timeline = choreographer.parse(description)
 
-    # Determine total frames from timeline
     max_frame = max(
         (a.frame + ACTIONS[a.action].duration_frames for a in timeline), default=FPS * 8
     )
-    total_frames = max_frame + FPS * 3  # 3s buffer at end
+    total_frames = max_frame + FPS * 3
 
     logger.info(
         "[%s] Total frames: %d (~%.1fs)", job_id, total_frames, total_frames / FPS
     )
 
-    # ── 2. Fighter setup ───────────────────────────────────────────────────────
+    # ── 2. Fighter setup ──────────────────────────────────────────────────────
     f1_state = FighterState(
         fighter_id=1,
         x=w * 0.30,
@@ -118,7 +117,6 @@ def generate_fight(
     f1_ctrl = FighterController(f1_state, fps=FPS)
     f2_ctrl = FighterController(f2_state, fps=FPS)
 
-    # Attach controller refs for hit resolution
     f1_state._ctrl = f1_ctrl
     f2_state._ctrl = f2_ctrl
 
@@ -126,13 +124,13 @@ def generate_fight(
     hit_detect = InteractionDetector()
     effects = EffectsRenderer()
 
-    # ── 3. Output video setup ──────────────────────────────────────────────────
+    # ── 3. Output video setup ─────────────────────────────────────────────────
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"-{job_id}.mp4")
     path = tmp.name
     tmp.close()
     writer = _open_writer(path, FPS, w, h)
 
-    # ── 4. Main simulation loop ────────────────────────────────────────────────
+    # ── 4. Main simulation loop ───────────────────────────────────────────────
     for fi in range(total_frames):
 
         # Schedule actions from timeline
@@ -141,16 +139,16 @@ def generate_fight(
                 ctrl = f1_ctrl if sched.fighter_id == 1 else f2_ctrl
                 ctrl.queue_action(sched.action)
 
-        # Update fighter state machines
-        f1_ctrl.update(fi)
-        f2_ctrl.update(fi)
+        # Update fighter state machines — pass opponent so they track each other
+        f1_ctrl.update(fi, opponent_state=f2_state)
+        f2_ctrl.update(fi, opponent_state=f1_state)
 
-        # Generate poses mathematically
+        # Generate poses — subtract air_height from root_y so jumps lift the body
         f1_pose = pose_gen.generate(
             f1_state.current_action,
             f1_state.action_progress,
             f1_state.x,
-            f1_state.y,
+            f1_state.y - f1_state.air_height,
             f1_state.facing,
             fi,
         )
@@ -158,54 +156,51 @@ def generate_fight(
             f2_state.current_action,
             f2_state.action_progress,
             f2_state.x,
-            f2_state.y,
+            f2_state.y - f2_state.air_height,
             f2_state.facing,
             fi,
         )
+
+        # Sync air_height from pose back to state for next frame
+        f1_state.air_height = f1_pose.air_height
+        f2_state.air_height = f2_pose.air_height
 
         # Hit detection
         hit1 = hit_detect.check(f1_state, f1_pose, f2_state, f2_pose, fi)
         hit2 = hit_detect.check(f2_state, f2_pose, f1_state, f1_pose, fi)
 
         if hit1:
-            f2_ctrl.apply_knockback(-f1_state.facing, 6.0)
+            f2_ctrl.apply_knockback(-f1_state.facing, 7.0)
             strike_pt = f2_pose.l_hip
             effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
-            effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 5)
+            effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
 
         if hit2:
-            f1_ctrl.apply_knockback(-f2_state.facing, 6.0)
+            f1_ctrl.apply_knockback(-f2_state.facing, 7.0)
             strike_pt = f1_pose.l_hip
             effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
-            effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 5)
+            effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
 
-        # ── Render frame ───────────────────────────────────────────────────────
+        # ── Render frame ──────────────────────────────────────────────────────
         frame = np.zeros((h, w, 3), dtype=np.uint8)
 
-        # Background
         draw_background(frame, w, h)
 
-        # Shadows
         draw_shadow(frame, f1_pose, floor_y)
         draw_shadow(frame, f2_pose, floor_y)
 
-        # Motion trails
         draw_trail(frame, f1_state.trail, f1_state.color)
         draw_trail(frame, f2_state.trail, f2_state.color)
 
-        # Fighters
         draw_fighter(frame, f1_pose, f1_state.color, h, 1, f1_state.hit_flash)
         draw_fighter(frame, f2_pose, f2_state.color, h, 2, f2_state.hit_flash)
 
-        # Effects (punch flashes, blood, dust)
         effects.render(frame)
 
-        # HUD (health bars)
         draw_hud(frame, w, h, f1_state, f2_state)
 
         writer.write(frame)
 
-        # Progress reporting
         if progress_callback and fi % 10 == 0:
             pct = int((fi / total_frames) * 100)
             progress_callback(min(pct, 99))
@@ -213,7 +208,7 @@ def generate_fight(
     writer.release()
     logger.info("[%s] Render complete — %d frames", job_id, total_frames)
 
-    # ── 5. Remux for web ───────────────────────────────────────────────────────
+    # ── 5. Remux for web ──────────────────────────────────────────────────────
     web_path = _remux(path, job_id)
     if os.path.exists(path):
         os.remove(path)

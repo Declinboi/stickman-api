@@ -91,7 +91,7 @@ export default function JobDetailPage() {
 
       <div className="card">
         {/* Title row with delete button */}
-        <div className="flex items-start justify-between mb-1">
+        <div className="flex justify-end mb-1">
           {/* <h1 className="text-xl font-bold text-white truncate flex-1">
             {currentJob.originalFilename}
           </h1> */}
