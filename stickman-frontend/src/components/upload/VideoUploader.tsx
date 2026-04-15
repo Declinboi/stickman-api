@@ -8,7 +8,7 @@ import {
   uploadStarted,
   uploadFinished,
   uploadFailed,
-  resetUpload,
+  // resetUpload,
 } from "../../store/slices/uploadSlice";
 import { addJob } from "../../store/slices/jobsSlice";
 

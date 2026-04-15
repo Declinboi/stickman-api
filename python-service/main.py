@@ -1,11 +1,17 @@
 import os
 import logging
 import tempfile
+import inspect  # ← add here
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from cloudinary_helper import upload_output_video
 from fight_generator import generate_fight
+import motion_curves
+
+print("motion_curves path:", inspect.getfile(motion_curves))
+print("has block_curve:", hasattr(motion_curves, "block_curve"))
+
 
 load_dotenv()
 

@@ -8,6 +8,7 @@ from motion_curves import (
     punch_curve,
     kick_curve,
     idle_breathe,
+    block_curve,
     anticipation_curve,
 )
 from actions import ActionType
