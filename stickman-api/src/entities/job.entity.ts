@@ -21,11 +21,8 @@ export class Job {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  originalFilename: string;
-
-  @Column()
-  inputVideoUrl: string;
+  @Column({ type: 'text' })
+  description: string;
 
   @Column({ nullable: true })
   outputVideoUrl: string;

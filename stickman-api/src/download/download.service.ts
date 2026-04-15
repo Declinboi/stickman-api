@@ -18,7 +18,7 @@ export class DownloadService {
   async getDownloadUrl(
     jobId: string,
     userId: string,
-  ): Promise<{ downloadUrl: string; filename: string; expiresIn: number }> {
+  ): Promise<{ downloadUrl: string; expiresIn: number }> {
     // 1. Fetch the job and verify it belongs to this user
     const job = await this.jobsService.findOne(jobId, userId);
 
@@ -50,9 +50,9 @@ export class DownloadService {
     );
 
     // 7. Build a clean output filename
-    const filename = `stickman-${job.originalFilename}`;
+    // const filename = `stickman-${job.originalFilename}`;
 
-    return { downloadUrl, filename, expiresIn };
+    return { downloadUrl, expiresIn };
   }
 
   async getJobResult(
@@ -62,7 +62,7 @@ export class DownloadService {
     jobId: string;
     status: string;
     progress: number;
-    originalFilename: string;
+    // originalFilename: string;
     outputVideoUrl: string | null;
     downloadUrl: string | null;
     duration: number | null;
@@ -86,7 +86,7 @@ export class DownloadService {
       jobId: job.id,
       status: job.status,
       progress: job.progress,
-      originalFilename: job.originalFilename,
+      // originalFilename: job.originalFilename,
       outputVideoUrl: job.outputVideoUrl ?? null,
       downloadUrl,
       duration: job.duration ?? null,

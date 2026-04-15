@@ -15,12 +15,10 @@ export type JobStatus = "pending" | "processing" | "completed" | "failed";
 
 export interface Job {
   id: string;
-  originalFilename: string;
-  inputVideoUrl: string;
+  description: string;
   outputVideoUrl?: string;
   status: JobStatus;
   progress: number;
-  duration?: number;
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
@@ -35,6 +33,5 @@ export interface JobsState {
 
 export interface UploadState {
   isUploading: boolean;
-  uploadProgress: number;
   error: string | null;
 }

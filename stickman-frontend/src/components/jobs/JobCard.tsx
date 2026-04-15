@@ -47,9 +47,9 @@ export default function JobCard({ job }: { job: Job }) {
         <div className="flex items-center justify-between">
           <div className="flex-1 min-w-0">
             {/* Filename */}
-            <p className="text-white font-medium truncate">
+            {/* <p className="text-white font-medium truncate">
               {job.originalFilename}
-            </p>
+            </p> */}
 
             {/* Date */}
             <p className="text-gray-500 text-sm mt-1">

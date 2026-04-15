@@ -1,332 +1,269 @@
-import cv2
-import numpy as np
-from pose_estimator import VISIBILITY_THRESHOLD, FIGHTER_COLORS
-
-# MediaPipe landmark indices
-NOSE = 0
-LEFT_EYE = 2
-RIGHT_EYE = 5
-LEFT_EAR = 7
-RIGHT_EAR = 8
-LEFT_SHOULDER = 11
-RIGHT_SHOULDER = 12
-LEFT_ELBOW = 13
-RIGHT_ELBOW = 14
-LEFT_WRIST = 15
-RIGHT_WRIST = 16
-LEFT_HIP = 23
-RIGHT_HIP = 24
-LEFT_KNEE = 25
-RIGHT_KNEE = 26
-LEFT_ANKLE = 27
-RIGHT_ANKLE = 28
-LEFT_FOOT = 31
-RIGHT_FOOT = 32
-BG_COLOR = (0, 0, 0)
-
-
-def _pt(landmarks: dict, idx: int):
-    lm = landmarks.get(idx)
-    if lm and lm["visibility"] >= VISIBILITY_THRESHOLD:
-        return (lm["x"], lm["y"])
-    return None
-
-
-def _midpoint(a, b):
-    if a and b:
-        return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
-    return a or b
-
-
-def _dist(a, b):
-    if not a or not b:
-        return 0
-    return int(np.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2))
-
-
-def _draw_capsule(frame, p1, p2, color, thickness):
-    if not p1 or not p2:
-        return
-    dx = p2[0] - p1[0]
-    dy = p2[1] - p1[1]
-    length = max(1, np.sqrt(dx**2 + dy**2))
-    px = -dy / length
-    py = dx / length
-    half = thickness / 2.0
-    c1 = (int(p1[0] + px * half), int(p1[1] + py * half))
-    c2 = (int(p1[0] - px * half), int(p1[1] - py * half))
-    c3 = (int(p2[0] - px * half), int(p2[1] - py * half))
-    c4 = (int(p2[0] + px * half), int(p2[1] + py * half))
-    pts = np.array([c1, c2, c3, c4], dtype=np.int32)
-    cv2.fillPoly(frame, [pts], color)
-    cv2.circle(frame, p1, int(half), color, -1, cv2.LINE_AA)
-    cv2.circle(frame, p2, int(half), color, -1, cv2.LINE_AA)
-
-
-def _draw_torso(frame, l_shoulder, r_shoulder, l_hip, r_hip, color):
-    if not all([l_shoulder, r_shoulder, l_hip, r_hip]):
-        return
-    pts = np.array([l_shoulder, r_shoulder, r_hip, l_hip], dtype=np.int32)
-    cv2.fillConvexPoly(frame, pts, color, cv2.LINE_AA)
-
-
-def _draw_head(frame, nose, color, scale):
-    if not nose:
-        return
-    head_r = max(18, int(scale * 0.07))
-    cv2.circle(frame, nose, head_r, color, -1, cv2.LINE_AA)
-
-
-def _draw_hand(frame, wrist, elbow, color, scale):
-    if not wrist or not elbow:
-        return
-    hand_r = max(7, int(scale * 0.025))
-    cv2.circle(frame, wrist, hand_r, color, -1, cv2.LINE_AA)
-    dx = wrist[0] - elbow[0]
-    dy = wrist[1] - elbow[1]
-    length = max(1, np.sqrt(dx**2 + dy**2))
-    nx, ny = dx / length, dy / length
-    px, py = -ny, nx
-    finger_len = int(hand_r * 1.6)
-    finger_w = max(2, hand_r // 3)
-    for offset in [-0.9, -0.3, 0.3, 0.9]:
-        fx = int(wrist[0] + px * offset * hand_r)
-        fy = int(wrist[1] + py * offset * hand_r)
-        tip_x = int(fx + nx * finger_len)
-        tip_y = int(fy + ny * finger_len)
-        _draw_capsule(frame, (fx, fy), (tip_x, tip_y), color, finger_w * 2)
-
-
-def _draw_foot(frame, ankle, knee, color, scale):
-    if not ankle or not knee:
-        return
-    foot_w = max(10, int(scale * 0.042))
-    foot_h = max(6, int(scale * 0.022))
-    dx = ankle[0] - knee[0]
-    dy = ankle[1] - knee[1]
-    length = max(1, np.sqrt(dx**2 + dy**2))
-    nx, ny = dx / length, dy / length
-    px, py = -ny, nx
-    p1 = (int(ankle[0] - px * foot_w * 0.35), int(ankle[1] - py * foot_w * 0.35))
-    p2 = (int(ankle[0] + px * foot_w * 0.75), int(ankle[1] + py * foot_w * 0.75))
-    p3 = (int(p2[0] + nx * foot_h * 1.8), int(p2[1] + ny * foot_h * 1.8))
-    p4 = (int(p1[0] + nx * foot_h * 1.8), int(p1[1] + ny * foot_h * 1.8))
-    pts = np.array([p1, p2, p3, p4], dtype=np.int32)
-    cv2.fillPoly(frame, [pts], color)
-    cv2.polylines(
-        frame, [pts], isClosed=True, color=color, thickness=1, lineType=cv2.LINE_AA
-    )
-
-
-class StickmanRenderer:
-    """
-    Renders segmented stickman fighters with dynamic auto-framing camera.
-    - Zoomed out to show full scene
-    - Auto-pans to keep all fighters centered
-    - Smooth camera interpolation to avoid jarring jumps
-    """
-
-    def __init__(self, width: int, height: int, zoom: float = 0.4) -> None:
-        self.width = width
-        self.height = height
-        self.scale = height
-
-        # Base zoom (lower = further away)
-        self.zoom = zoom
-
-        # Smoothed camera state
-        self._smooth_ox: float = 0.0
-        self._smooth_oy: float = 0.0
-        self._smooth_zoom: float = zoom
-
-        # Lower = smoother, more cinematic
-        self._smoothing: float = 0.05
-
-    def _apply_camera(
-        self,
-        landmarks: dict[int, dict],
-        zoom: float,
-        offset_x: float,
-        offset_y: float,
-    ) -> dict[int, dict]:
-        cx, cy = self.width // 2, self.height // 2
-        result = {}
-
-        for idx, lm in landmarks.items():
-            result[idx] = {
-                "x": int(cx + (lm["x"] - cx) * zoom + offset_x),
-                "y": int(cy + (lm["y"] - cy) * zoom + offset_y),
-                "visibility": lm["visibility"],
-            }
-
-        return result
-
-    def _compute_dynamic_camera(
-        self,
-        all_landmarks: list,
-        padding: float = 0.5,  # MORE SPACE around fighters
-    ) -> tuple[float, float, float]:
-
-        all_x, all_y = [], []
-
-        for landmarks in all_landmarks:
-            if not landmarks:
-                continue
-
-            for lm in landmarks.values():
-                if lm["visibility"] >= VISIBILITY_THRESHOLD:
-                    all_x.append(lm["x"])
-                    all_y.append(lm["y"])
-
-        if not all_x:
-            return self.zoom, 0.0, 0.0
-
-        min_x, max_x = min(all_x), max(all_x)
-        min_y, max_y = min(all_y), max(all_y)
-
-        center_x = (min_x + max_x) / 2
-        center_y = (min_y + max_y) / 2
-
-        span_x = max_x - min_x
-        span_y = max_y - min_y
-
-        if span_x > 0 and span_y > 0:
-            zoom_x = (self.width * (1.0 - padding)) / max(span_x, 1)
-            zoom_y = (self.height * (1.0 - padding)) / max(span_y, 1)
-
-            # Base fit zoom
-            target_zoom = min(zoom_x, zoom_y)
-
-            # 🔥 FORCE camera to be further away
-            target_zoom *= 0.3
-
-            # 🔒 Prevent zooming too close
-            target_zoom = max(0.25, target_zoom)
-
-        else:
-            target_zoom = self.zoom
-
-        cx, cy = self.width / 2, self.height / 2
-
-        target_ox = cx - center_x * target_zoom
-        target_oy = cy - center_y * target_zoom
-
-        return target_zoom, target_ox, target_oy
-
-    def _update_smooth_camera(
-        self,
-        target_zoom: float,
-        target_ox: float,
-        target_oy: float,
-    ) -> tuple[float, float, float]:
-
-        s = self._smoothing
-
-        self._smooth_zoom += (target_zoom - self._smooth_zoom) * s
-        self._smooth_ox += (target_ox - self._smooth_ox) * s
-        self._smooth_oy += (target_oy - self._smooth_oy) * s
-
-        return self._smooth_zoom, self._smooth_ox, self._smooth_oy
-
-    def render_all(
-        self,
-        all_landmarks: list[dict[int, dict] | None],
-    ) -> np.ndarray:
-
-        frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        frame[:] = BG_COLOR
-
-        target_zoom, target_ox, target_oy = self._compute_dynamic_camera(all_landmarks)
-        zoom, ox, oy = self._update_smooth_camera(target_zoom, target_ox, target_oy)
-
-        for fighter_idx, landmarks in enumerate(all_landmarks):
-            if not landmarks:
-                continue
-
-            color = FIGHTER_COLORS[fighter_idx % len(FIGHTER_COLORS)]
-            scaled = self._apply_camera(landmarks, zoom, ox, oy)
-            self._draw_fighter(frame, scaled, color, fighter_idx + 1)
-
-        return frame
-
-    # def render(self, landmarks: dict[int, dict]) -> np.ndarray:
-    #     return self.render_all([landmarks])
-
-    def _draw_fighter(
-        self,
-        frame: np.ndarray,
-        landmarks: dict[int, dict],
-        color: tuple,
-        fighter_number: int,
-    ) -> None:
-        s = self.scale
-        torso_t = max(10, int(s * 0.038))
-        upper_t = max(9, int(s * 0.032))
-        lower_t = max(8, int(s * 0.026))
-
-        nose = _pt(landmarks, NOSE)
-        l_shoulder = _pt(landmarks, LEFT_SHOULDER)
-        r_shoulder = _pt(landmarks, RIGHT_SHOULDER)
-        l_elbow = _pt(landmarks, LEFT_ELBOW)
-        r_elbow = _pt(landmarks, RIGHT_ELBOW)
-        l_wrist = _pt(landmarks, LEFT_WRIST)
-        r_wrist = _pt(landmarks, RIGHT_WRIST)
-        l_hip = _pt(landmarks, LEFT_HIP)
-        r_hip = _pt(landmarks, RIGHT_HIP)
-        l_knee = _pt(landmarks, LEFT_KNEE)
-        r_knee = _pt(landmarks, RIGHT_KNEE)
-        l_ankle = _pt(landmarks, LEFT_ANKLE)
-        r_ankle = _pt(landmarks, RIGHT_ANKLE)
-        mid_shoulder = _midpoint(l_shoulder, r_shoulder)
-
-        # Draw order: back to front
-        _draw_capsule(frame, l_hip, l_knee, color, upper_t)
-        _draw_capsule(frame, l_knee, l_ankle, color, lower_t)
-        _draw_capsule(frame, r_hip, r_knee, color, upper_t)
-        _draw_capsule(frame, r_knee, r_ankle, color, lower_t)
-
-        _draw_foot(frame, l_ankle, l_knee, color, s)
-        _draw_foot(frame, r_ankle, r_knee, color, s)
-
-        _draw_torso(frame, l_shoulder, r_shoulder, l_hip, r_hip, color)
-
-        if mid_shoulder and nose:
-            _draw_capsule(frame, mid_shoulder, nose, color, max(6, int(s * 0.022)))
-
-        _draw_capsule(frame, l_shoulder, l_elbow, color, upper_t)
-        _draw_capsule(frame, l_elbow, l_wrist, color, lower_t)
-        _draw_capsule(frame, r_shoulder, r_elbow, color, upper_t)
-        _draw_capsule(frame, r_elbow, r_wrist, color, lower_t)
-
-        _draw_hand(frame, l_wrist, l_elbow, color, s)
-        _draw_hand(frame, r_wrist, r_elbow, color, s)
-
-        _draw_head(frame, nose, color, s)
-
-        if nose:
-            head_r = max(18, int(s * 0.07))
-            label_pos = (nose[0] - 10, nose[1] - head_r - 10)
-            cv2.putText(
-                frame,
-                f"P{fighter_number}",
-                (label_pos[0] + 1, label_pos[1] + 1),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 0),
-                3,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                frame,
-                f"P{fighter_number}",
-                label_pos,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                color,
-                2,
-                cv2.LINE_AA,
-            )
-
-    def render(self, landmarks: dict[int, dict]) -> np.ndarray:
-        """Backward-compatible single-fighter render."""
-        return self.render_all([landmarks])
+# import cv2
+# import numpy as np
+
+# # ── Indices ─────────────────────────────────────
+# NOSE = 0
+# LEFT_SHOULDER = 11
+# RIGHT_SHOULDER = 12
+# LEFT_ELBOW = 13
+# RIGHT_ELBOW = 14
+# LEFT_WRIST = 15
+# RIGHT_WRIST = 16
+# LEFT_HIP = 23
+# RIGHT_HIP = 24
+# LEFT_KNEE = 25
+# RIGHT_KNEE = 26
+# LEFT_ANKLE = 27
+# RIGHT_ANKLE = 28
+
+# VISIBILITY_THRESHOLD = 0.1
+
+# # FIXED: 3 colors for 3 fighters
+# FIGHTER_COLORS = [
+#     (255, 255, 255),  # Fighter 1 — white
+#     (0, 255, 255),  # Fighter 2 — cyan
+#     (0, 100, 255),  # Fighter 3 — orange
+# ]
+
+# # ── helpers ─────────────────────────────────────
+
+
+# def _pt(lm, idx):
+#     p = lm.get(idx)
+#     if p and p["visibility"] >= VISIBILITY_THRESHOLD:
+#         return (int(p["x"]), int(p["y"]))
+#     return None
+
+
+# def _mid(a, b):
+#     if a and b:
+#         return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
+#     return a or b
+
+
+# def _dist(a, b):
+#     if not a or not b:
+#         return 0
+#     return np.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
+# # ── drawing ─────────────────────────────────────
+
+
+# def draw_limb(frame, p1, p2, color, t):
+#     if not p1 or not p2:
+#         return
+#     t = max(1, int(t))
+#     cv2.line(frame, p1, p2, color, t, cv2.LINE_AA)
+#     cv2.circle(frame, p1, max(1, t // 2), color, -1)
+#     cv2.circle(frame, p2, max(1, t // 2), color, -1)
+
+
+# def draw_joint(frame, p, r, color):
+#     if p:
+#         cv2.circle(frame, p, max(1, r), color, -1)
+
+
+# def draw_head(frame, p, r, color):
+#     if not p:
+#         return
+#     r = max(5, r)
+#     cv2.circle(frame, p, r, color, -1)
+#     cv2.circle(frame, (p[0] - r // 3, p[1] - r // 4), 2, (0, 0, 0), -1)
+#     cv2.circle(frame, (p[0] + r // 3, p[1] - r // 4), 2, (0, 0, 0), -1)
+
+
+# # ── effects ─────────────────────────────────────
+
+
+# def motion_trail(frame, p1, p2, color, t):
+#     for i in range(1, 4):
+#         overlay = frame.copy()
+#         alpha = 0.2 * (4 - i)
+#         offset = i * 4
+#         p1o = (p1[0] - offset, p1[1])
+#         p2o = (p2[0] - offset, p2[1])
+#         cv2.line(overlay, p1o, p2o, color, max(1, t), cv2.LINE_AA)
+#         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+
+
+# def impact_effect(frame, p):
+#     if not p:
+#         return
+#     for r in range(10, 40, 6):
+#         cv2.circle(frame, p, r, (255, 255, 255), 1)
+
+
+# def dynamic_thickness(p1, p2):
+#     speed = _dist(p1, p2)
+#     if speed == 0:
+#         return 6
+#     return int(max(5, min(18, speed * 0.05)))
+
+
+# # ── background & floor ──────────────────────────
+
+
+# def draw_background(frame, w, h):
+#     top_color = np.array([40, 20, 10], dtype=np.float32)
+#     bottom_color = np.array([80, 50, 20], dtype=np.float32)
+#     for y in range(h):
+#         t = y / h
+#         color = ((1 - t) * top_color + t * bottom_color).astype(np.uint8)
+#         frame[y, :] = color
+
+
+# def draw_floor(frame, w, h):
+#     floor_y = int(h * 0.88)
+#     floor_color = (50, 80, 30)
+#     line_color = (100, 160, 60)
+#     shadow_color = (30, 50, 20)
+
+#     cv2.rectangle(frame, (0, floor_y), (w, h), floor_color, -1)
+#     cv2.line(frame, (0, floor_y), (w, floor_y), line_color, 3, cv2.LINE_AA)
+#     cv2.line(frame, (0, floor_y - 1), (w, floor_y - 1), shadow_color, 1, cv2.LINE_AA)
+
+
+# # ── renderer ────────────────────────────────────
+
+
+# class StickmanRenderer:
+#     def __init__(self, w, h, num_fighters=3):  # FIXED: num_fighters param
+#         self.w = w
+#         self.h = h
+#         # FIXED: dynamically sized to num_fighters instead of hardcoded 2
+#         self.prev = [None] * num_fighters
+#         self.last_known = [None] * num_fighters
+
+#     def render_all(self, all_landmarks):
+#         frame = np.zeros((self.h, self.w, 3), dtype=np.uint8)
+#         draw_background(frame, self.w, self.h)
+#         draw_floor(frame, self.w, self.h)
+
+#         impact_detected = False
+
+#         # FIXED: dynamically grow internal state if more fighters appear
+#         if len(all_landmarks) > len(self.prev):
+#             extra = len(all_landmarks) - len(self.prev)
+#             self.prev += [None] * extra
+#             self.last_known += [None] * extra
+
+#         for i, lm in enumerate(all_landmarks):
+#             if lm:
+#                 self.last_known[i] = lm
+#             else:
+#                 lm = self.last_known[i]
+
+#             if not lm:
+#                 continue
+
+#             color = FIGHTER_COLORS[i % len(FIGHTER_COLORS)]
+#             impact = self.draw_fighter(frame, lm, color, i)
+
+#             if impact:
+#                 impact_detected = True
+
+#         # FIXED: check impacts across ALL fighter pairs, not just 0 vs 1
+#         self._check_cross_impacts(frame, all_landmarks)
+
+#         return frame, impact_detected
+
+#     def _check_cross_impacts(self, frame, all_landmarks):
+#         """Check wrist proximity between every pair of fighters."""
+#         lms = [
+#             self.last_known[i] if not all_landmarks[i] else all_landmarks[i]
+#             for i in range(len(all_landmarks))
+#         ]
+#         for i in range(len(lms)):
+#             for j in range(i + 1, len(lms)):
+#                 if not lms[i] or not lms[j]:
+#                     continue
+#                 # Check if any wrist of fighter i is close to any wrist of fighter j
+#                 for wi in [LEFT_WRIST, RIGHT_WRIST]:
+#                     for wj in [LEFT_WRIST, RIGHT_WRIST]:
+#                         pi = _pt(lms[i], wi)
+#                         pj = _pt(lms[j], wj)
+#                         if pi and pj and _dist(pi, pj) < 40:
+#                             impact_effect(frame, _mid(pi, pj))
+
+#     def draw_fighter(self, frame, lm, color, idx):
+#         prev = self.prev[idx]
+
+#         l_sh = _pt(lm, LEFT_SHOULDER)
+#         r_sh = _pt(lm, RIGHT_SHOULDER)
+#         l_el = _pt(lm, LEFT_ELBOW)
+#         r_el = _pt(lm, RIGHT_ELBOW)
+#         l_wr = _pt(lm, LEFT_WRIST)
+#         r_wr = _pt(lm, RIGHT_WRIST)
+#         l_hp = _pt(lm, LEFT_HIP)
+#         r_hp = _pt(lm, RIGHT_HIP)
+#         l_kn = _pt(lm, LEFT_KNEE)
+#         r_kn = _pt(lm, RIGHT_KNEE)
+#         l_an = _pt(lm, LEFT_ANKLE)
+#         r_an = _pt(lm, RIGHT_ANKLE)
+#         nose = _pt(lm, NOSE)
+
+#         mid_sh = _mid(l_sh, r_sh)
+#         mid_hp = _mid(l_hp, r_hp)
+
+#         sh_width = _dist(l_sh, r_sh) if (l_sh and r_sh) else 40
+#         head_r = max(12, int(sh_width * 0.35))
+
+#         # ── Head position ─────────────────────────────
+#         if nose:
+#             head_pt = nose
+#         elif mid_sh:
+#             head_pt = (mid_sh[0], mid_sh[1] - int(sh_width * 0.6))
+#         else:
+#             head_pt = None
+
+#         t_arm = dynamic_thickness(l_sh, l_el)
+#         t_leg = dynamic_thickness(l_hp, l_kn)
+
+#         # ── Neck ─────────────────────────────────────
+#         if head_pt and mid_sh:
+#             dist_nh = max(_dist(head_pt, mid_sh), 1)
+#             dx = mid_sh[0] - head_pt[0]
+#             dy = mid_sh[1] - head_pt[1]
+#             neck_top = (
+#                 int(head_pt[0] + (dx / dist_nh) * head_r),
+#                 int(head_pt[1] + (dy / dist_nh) * head_r),
+#             )
+#             cv2.line(frame, neck_top, mid_sh, color, 5, cv2.LINE_AA)
+
+#         # ── Shoulder & Hip bars ───────────────────────
+#         draw_limb(frame, l_sh, r_sh, color, 6)
+#         draw_limb(frame, l_hp, r_hp, color, 6)
+
+#         # ── Arms ──────────────────────────────────────
+#         draw_limb(frame, l_sh, l_el, color, t_arm)
+#         draw_limb(frame, l_el, l_wr, color, t_arm)
+#         draw_limb(frame, r_sh, r_el, color, t_arm)
+#         draw_limb(frame, r_el, r_wr, color, t_arm)
+
+#         # ── Legs ──────────────────────────────────────
+#         draw_limb(frame, l_hp, l_kn, color, t_leg)
+#         draw_limb(frame, l_kn, l_an, color, t_leg)
+#         draw_limb(frame, r_hp, r_kn, color, t_leg)
+#         draw_limb(frame, r_kn, r_an, color, t_leg)
+
+#         # ── Torso ─────────────────────────────────────
+#         draw_limb(frame, mid_sh, mid_hp, color, 8)
+
+#         # ── Head (on top of everything) ───────────────
+#         draw_head(frame, head_pt, head_r, color)
+
+#         # ── Motion trails ────────────────────────────
+#         if prev:
+#             p_prev = _pt(prev, LEFT_WRIST)
+#             if p_prev and l_wr and _dist(p_prev, l_wr) > 20:
+#                 motion_trail(frame, p_prev, l_wr, color, t_arm)
+
+#         # ── Impact detection (self — both wrists close) ──
+#         impact = False
+#         if l_wr and r_wr and _dist(l_wr, r_wr) < 40:
+#             impact_effect(frame, _mid(l_wr, r_wr))
+#             impact = True
+
+#         self.prev[idx] = lm
+#         return impact

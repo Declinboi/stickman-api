@@ -18,7 +18,6 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">
           Welcome back,{" "}
@@ -27,20 +26,19 @@ export default function DashboardPage() {
           </span>
         </h1>
         <p className="text-gray-500 mt-1">
-          Upload a fighting scene to convert it into stickman animation
+          Describe a fight sequence and watch it come to life as stickman
+          animation.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Uploader — left column */}
         <div className="lg:col-span-1">
           <VideoUploader />
         </div>
 
-        {/* Jobs list — right columns */}
         <div className="lg:col-span-2">
           <h2 className="text-lg font-semibold text-white mb-4">
-            Your Conversions
+            Your Animations
           </h2>
 
           {isLoading ? (
@@ -53,7 +51,7 @@ export default function DashboardPage() {
             <div className="card text-center py-16">
               <Film size={48} className="mx-auto text-gray-700 mb-3" />
               <p className="text-gray-500">
-                No conversions yet. Upload a video to get started.
+                No animations yet. Describe a fight to get started.
               </p>
             </div>
           ) : (

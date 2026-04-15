@@ -22,8 +22,8 @@ export class QueueConsumer extends WorkerHost {
     super();
   }
   async process(job: Job<VideoJobPayload>): Promise<void> {
-    const { jobId, inputVideoUrl, originalFilename } = job.data;
-    this.logger.log(`Processing job ${jobId} — ${originalFilename}`);
+    const { jobId, description } = job.data;
+    this.logger.log(`Processing job ${jobId}  `);
     try {
       // 1. Mark as processing in PostgreSQL + emit via WebSocket
       await this.jobsService.updateStatus(jobId, JobStatus.PROCESSING, {
@@ -49,7 +49,9 @@ export class QueueConsumer extends WorkerHost {
               `${pythonServiceUrl}/process`,
               {
                 job_id: jobId,
-                input_video_url: inputVideoUrl,
+                description:
+                  job.data.description ??
+                  'Fighter 1 punches, Fighter 2 blocks, Fighter 1 kicks, Fighter 2 knockback',
               },
               {
                 timeout: 10 * 60 * 1000, // 10 min per attempt

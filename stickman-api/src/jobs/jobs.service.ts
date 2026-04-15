@@ -10,17 +10,10 @@ export class JobsService {
     private jobRepository: Repository<Job>,
   ) {}
 
-  async createJob(data: {
-    originalFilename: string;
-    inputVideoUrl: string;
-    userId: string;
-    duration?: number;
-  }): Promise<Job> {
+  async createJob(data: { description: string; userId: string }): Promise<Job> {
     const job = this.jobRepository.create({
-      originalFilename: data.originalFilename,
-      inputVideoUrl: data.inputVideoUrl,
+      description: data.description,
       userId: data.userId,
-      duration: data.duration,
       status: JobStatus.PENDING,
       progress: 0,
     });
@@ -35,9 +28,7 @@ export class JobsService {
   }
 
   async findOne(id: string, userId: string): Promise<Job> {
-    const job = await this.jobRepository.findOne({
-      where: { id, userId },
-    });
+    const job = await this.jobRepository.findOne({ where: { id, userId } });
     if (!job) throw new NotFoundException(`Job ${id} not found`);
     return job;
   }
@@ -52,7 +43,6 @@ export class JobsService {
     },
   ): Promise<Job> {
     await this.jobRepository.update(id, { status, ...extra });
-    // Fix: handle the null case after fetching
     const updated = await this.jobRepository.findOne({ where: { id } });
     if (!updated) throw new NotFoundException(`Job ${id} not found`);
     return updated;
