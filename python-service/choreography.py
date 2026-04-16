@@ -138,7 +138,10 @@ class Choreographer:
             )
 
             # Advance this fighter's clock, with slight overlap (80%)
-            clock[fighter_id] += int(action_def.duration_frames * 0.80)
+            _FULL_DURATION = {ActionType.FALL, ActionType.GETUP, ActionType.KNOCKBACK}
+
+            overlap = 1.0 if action in _FULL_DURATION else 0.65
+            clock[fighter_id] += int(action_def.duration_frames * overlap)
 
         if not timeline:
             timeline = self._default_fight()
@@ -184,6 +187,6 @@ class Choreographer:
                     action=action,
                 )
             )
-            clock[fid] += int(ACTIONS[action].duration_frames * 0.80)
+            clock[fid] += int(ACTIONS[action].duration_frames * 0.45)
 
         return sorted(result, key=lambda a: a.frame)

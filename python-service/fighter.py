@@ -45,7 +45,7 @@ class FighterController:
     - Applies physics (approach, lunge, jump, knockback)
     """
 
-    IDEAL_FIGHT_DIST = 220  # pixels between hip centers
+    IDEAL_FIGHT_DIST = 200  # pixels between hip centers
 
     def __init__(self, state: FighterState, fps: float = 30.0) -> None:
         self.state = state
@@ -106,9 +106,11 @@ class FighterController:
             idle_or_walk = s.current_action in (ActionType.IDLE, ActionType.WALK)
 
             if idle_or_walk:
-                if dist > self.IDEAL_FIGHT_DIST + 30:
+                if dist > self.IDEAL_FIGHT_DIST + 20:
                     # Too far — walk in
-                    s.vel_x = direction * 3.8
+                    max_approach = 7.0
+                    dist_factor = clamp((dist - self.IDEAL_FIGHT_DIST) / 200.0, 0.0, 1.0)
+                    s.vel_x = direction * max_approach * dist_factor
                     if s.current_action == ActionType.IDLE:
                         s.current_action = ActionType.WALK
                         s.action_frame = 0
@@ -128,21 +130,21 @@ class FighterController:
                 ActionType.PUNCH_RIGHT,
                 ActionType.UPPERCUT,
             ):
-                s.vel_x = s.facing * 5.0  # lunge into punch
+                s.vel_x = s.facing * 18.0  # lunge into punch
 
             elif s.current_action == ActionType.SWEEP_KICK:
-                s.vel_x = s.facing * 4.0
+                s.vel_x = s.facing * 14.0
 
             elif s.current_action in (ActionType.KICK_LEFT, ActionType.KICK_RIGHT):
-                s.vel_x = s.facing * 3.0
+                s.vel_x = s.facing * 12.0
 
             elif s.current_action == ActionType.JUMP_KICK:
-                s.vel_x = s.facing * 7.0  # fly forward
-                s.vel_y = -20.0  # launch upward
+                s.vel_x = s.facing * 22.0  # fly forward
+                s.vel_y = -28.0  # launch upward
                 s.on_ground = False
 
             elif s.current_action == ActionType.DODGE:
-                s.vel_x = -s.facing * 8.0  # dash backward
+                s.vel_x = -s.facing * 22.0  # dash backward
 
             elif s.current_action == ActionType.KNOCKBACK:
                 pass  # handled by apply_knockback
@@ -150,6 +152,16 @@ class FighterController:
         # ── Physics ───────────────────────────────────────────────────────────
         s.x = clamp(s.x + s.vel_x, 80, 10000)
         s.y += s.vel_y
+
+        # ── Hard separation wall ────────────────────────────────
+        MIN_SEP = 160  # minimum pixel gap between hip centres
+        if opponent_state is not None:
+            gap = opponent_state.x - s.x
+        if abs(gap) < MIN_SEP:
+            push = (MIN_SEP - abs(gap)) / 2.0
+            direction = 1 if gap > 0 else -1
+            s.x -= direction * push  # push self away
+            s.vel_x *= -0.3  # bounce velocity
 
         if not s.on_ground:
             s.vel_y += 1.5  # gravity
@@ -159,7 +171,7 @@ class FighterController:
                 s.on_ground = True
 
         # Friction — less in air so jumps feel floaty
-        s.vel_x *= 0.78 if s.on_ground else 0.96
+        s.vel_x *= 0.88 if s.on_ground else 0.96
 
         # ── Timers ────────────────────────────────────────────────────────────
         if s.hit_flash > 0:
@@ -172,9 +184,28 @@ class FighterController:
         if len(s.trail) > s.max_trail:
             s.trail.pop(0)
 
-    def apply_knockback(self, direction: int, force: float) -> None:
+
+    def apply_knockback(
+        self,
+        direction: int,
+        force: float,
+        hit_type: str = "default",
+    ) -> None:
+
+        # Upward launch strengths per hit type
+        _LAUNCH_Y: dict[str, float] = {
+            "punch": -4.0,  # slight pop
+            "kick": -7.0,  # visible lift
+            "uppercut": -14.0,  # strong launch
+            "sweep": 0.0,  # stays grounded (leg sweep)
+            "jump_kick": -10.0,  # flying impact
+            "default": -3.0,
+        }
         s = self.state
         s.vel_x = direction * force
+        s.vel_y = _LAUNCH_Y.get(hit_type, _LAUNCH_Y["default"])
+        if s.vel_y < 0:
+            s.on_ground = False  # lift off
         s.hit_flash = 8
         s.stagger = 6
         s.health = max(0.0, s.health - 12.0)

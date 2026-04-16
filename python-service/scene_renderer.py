@@ -3,13 +3,11 @@ import numpy as np
 from pose_generator import Pose
 from motion_curves import clamp
 
-# ── Fighter colors (BGR) ───────────────────────────────────────────────────────
 FIGHTER_COLORS = [
     (255, 255, 255),  # P1 — white
     (0, 255, 255),  # P2 — yellow
 ]
 
-# ── Scene ──────────────────────────────────────────────────────────────────────
 SKY_TOP = (30, 18, 12)
 SKY_BOT = (70, 45, 28)
 FLOOR_COL = (12, 8, 5)
@@ -29,34 +27,24 @@ def _bl(a, b, t):
     return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-# ── Background ─────────────────────────────────────────────────────────────────
-
-
 def draw_background(frame, w, h):
     fy = int(h * FLOOR_Y)
-
     for y in range(fy):
         t = y / max(fy - 1, 1)
         cv2.line(frame, (0, y), (w, y), _bl(SKY_TOP, SKY_BOT, t), 1)
-
     cv2.rectangle(frame, (0, fy), (w, h), FLOOR_COL, -1)
-
-    # Horizon glow
     gw = int(h * 0.035)
     for i in range(gw):
         a = 1.0 - i / gw
         cv2.line(
             frame, (0, fy + i), (w, fy + i), _bl(FLOOR_COL, (90, 58, 30), a * 0.55), 1
         )
-
-    # Perspective grid
     cx = w // 2
     sp = w * 1.1
     for i in range(13):
         t = i / 12
         bx = int(-sp / 2 + t * sp)
         cv2.line(frame, (cx + (bx - cx) // 7, fy), (bx, h), FLOOR_GRID, 1, cv2.LINE_AA)
-
     for i in range(1, 9):
         t = (i / 8) ** 1.7
         y = int(fy + t * (h - fy))
@@ -87,9 +75,6 @@ def draw_shadow(frame, pose: Pose, floor_y: int):
         cv2.addWeighted(ov, al, frame, 1 - al, 0, frame)
 
 
-# ── 3D primitives ──────────────────────────────────────────────────────────────
-
-
 def draw_cylinder(frame, p1, p2, color, thickness):
     if not p1 or not p2:
         return
@@ -112,8 +97,6 @@ def draw_cylinder(frame, p1, p2, color, thickness):
         c3 = (int(p2[0] + px * te * h), int(p2[1] + py * te * h))
         c4 = (int(p2[0] + px * ts * h), int(p2[1] + py * ts * h))
         cv2.fillConvexPoly(frame, np.array([c1, c2, c3, c4], np.int32), bc, cv2.LINE_AA)
-
-    # Specular line
     so = 0.25
     sp1 = (int(p1[0] + px * so * h), int(p1[1] + py * so * h))
     sp2 = (int(p2[0] + px * so * h), int(p2[1] + py * so * h))
@@ -206,9 +189,6 @@ def draw_hand(frame, wrist, elbow, color, scale):
         draw_cylinder(frame, (fx, fy), tip, color, ft * 2)
 
 
-# ── Motion trail ───────────────────────────────────────────────────────────────
-
-
 def draw_trail(frame, trail: list, color: tuple):
     for i, (tx, ty) in enumerate(trail[:-1]):
         alpha = (i / len(trail)) * 0.35
@@ -218,63 +198,12 @@ def draw_trail(frame, trail: list, color: tuple):
         cv2.addWeighted(ov, alpha, frame, 1 - alpha, 0, frame)
 
 
-# ── Health bar ─────────────────────────────────────────────────────────────────
-
-
-def draw_hud(frame, w, h, f1_state, f2_state):
-    bar_w = int(w * 0.30)
-    bar_h = 14
-    margin = 20
-    y = 20
-
-    # P1 bar (left)
-    pct1 = clamp(f1_state.health / 100.0, 0.0, 1.0)
-    cv2.rectangle(frame, (margin, y), (margin + bar_w, y + bar_h), (40, 40, 40), -1)
-    fill_color = (0, int(200 * pct1), int(60 * (1 - pct1)))
-    cv2.rectangle(
-        frame, (margin, y), (margin + int(bar_w * pct1), y + bar_h), fill_color, -1
-    )
-    cv2.rectangle(frame, (margin, y), (margin + bar_w, y + bar_h), (80, 80, 80), 1)
-    cv2.putText(
-        frame,
-        "P1",
-        (margin, y - 4),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        FIGHTER_COLORS[0],
-        1,
-        cv2.LINE_AA,
-    )
-
-    # P2 bar (right)
-    pct2 = clamp(f2_state.health / 100.0, 0.0, 1.0)
-    x2 = w - margin - bar_w
-    cv2.rectangle(frame, (x2, y), (x2 + bar_w, y + bar_h), (40, 40, 40), -1)
-    fill_w = int(bar_w * pct2)
-    fill_color2 = (0, int(200 * pct2), int(60 * (1 - pct2)))
-    cv2.rectangle(
-        frame, (x2 + bar_w - fill_w, y), (x2 + bar_w, y + bar_h), fill_color2, -1
-    )
-    cv2.rectangle(frame, (x2, y), (x2 + bar_w, y + bar_h), (80, 80, 80), 1)
-    cv2.putText(
-        frame,
-        "P2",
-        (x2 + bar_w + 4, y - 4),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        FIGHTER_COLORS[1],
-        1,
-        cv2.LINE_AA,
-    )
-
-
-# ── Full fighter draw ──────────────────────────────────────────────────────────
+# draw_hud intentionally removed — no health bars
 
 
 def draw_fighter(
     frame, pose: Pose, color: tuple, scale: int, fighter_number: int, hit_flash: int = 0
 ):
-    # Hit flash — briefly tint white
     draw_color = (255, 255, 255) if hit_flash > 0 else color
 
     s = scale
@@ -287,7 +216,6 @@ def draw_fighter(
     def ip(pt):
         return (int(pt[0]), int(pt[1]))
 
-    # Back to front draw order
     draw_cylinder(frame, ip(pose.l_hip), ip(pose.l_knee), draw_color, ut)
     draw_cylinder(frame, ip(pose.r_hip), ip(pose.r_knee), draw_color, ut)
     draw_cylinder(frame, ip(pose.l_knee), ip(pose.l_ankle), draw_color, lt)
@@ -320,27 +248,3 @@ def draw_fighter(
     draw_hand(frame, ip(pose.l_wrist), ip(pose.l_elbow), draw_color, s)
     draw_hand(frame, ip(pose.r_wrist), ip(pose.r_elbow), draw_color, s)
     draw_sphere(frame, ip(pose.head), hr, draw_color)
-
-    # Label
-    lx = int(pose.head[0]) - 10
-    ly = int(pose.head[1]) - hr - 10
-    cv2.putText(
-        frame,
-        f"P{fighter_number}",
-        (lx + 2, ly + 2),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.65,
-        (0, 0, 0),
-        4,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame,
-        f"P{fighter_number}",
-        (lx, ly),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.65,
-        color,
-        2,
-        cv2.LINE_AA,
-    )

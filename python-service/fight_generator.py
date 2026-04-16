@@ -16,7 +16,6 @@ from scene_renderer import (
     draw_shadow,
     draw_trail,
     draw_fighter,
-    draw_hud,
     FIGHTER_COLORS,
 )
 from actions import ActionType, ACTIONS
@@ -148,7 +147,7 @@ def generate_fight(
             f1_state.current_action,
             f1_state.action_progress,
             f1_state.x,
-            f1_state.y - f1_state.air_height,
+            f1_state.y,
             f1_state.facing,
             fi,
         )
@@ -156,7 +155,7 @@ def generate_fight(
             f2_state.current_action,
             f2_state.action_progress,
             f2_state.x,
-            f2_state.y - f2_state.air_height,
+            f2_state.y, 
             f2_state.facing,
             fi,
         )
@@ -170,13 +169,25 @@ def generate_fight(
         hit2 = hit_detect.check(f2_state, f2_pose, f1_state, f1_pose, fi)
 
         if hit1:
-            f2_ctrl.apply_knockback(-f1_state.facing, 7.0)
+            kb_dir = 1 if f2_state.x > f1_state.x else -1
+            _HIT_TYPE_MAP = {
+                ActionType.UPPERCUT: "uppercut",
+                ActionType.JUMP_KICK: "jump_kick",
+                ActionType.KICK_LEFT: "kick",
+                ActionType.KICK_RIGHT: "kick",
+                ActionType.SWEEP_KICK: "sweep",
+                ActionType.PUNCH_LEFT: "punch",
+                ActionType.PUNCH_RIGHT: "punch",
+            }
+            hit_type = _HIT_TYPE_MAP.get(f1_state.current_action, "default")
+            f2_ctrl.apply_knockback(kb_dir, 9.0, hit_type=hit_type)
             strike_pt = f2_pose.l_hip
             effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
             effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
 
         if hit2:
-            f1_ctrl.apply_knockback(-f2_state.facing, 7.0)
+            kb_dir = 1 if f1_state.x > f2_state.x else -1
+            f1_ctrl.apply_knockback(kb_dir, 9.0)
             strike_pt = f1_pose.l_hip
             effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
             effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
@@ -196,8 +207,6 @@ def generate_fight(
         draw_fighter(frame, f2_pose, f2_state.color, h, 2, f2_state.hit_flash)
 
         effects.render(frame)
-
-        draw_hud(frame, w, h, f1_state, f2_state)
 
         writer.write(frame)
 

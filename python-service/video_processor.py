@@ -141,8 +141,8 @@ def process_video(
                     ctrl.queue_action(sched.action)
 
             # Advance state machines
-            f1_ctrl.update(fi)
-            f2_ctrl.update(fi)
+            f1_ctrl.update(fi, opponent_state=f2_state)
+            f2_ctrl.update(fi, opponent_state=f1_state)
 
             # Generate poses mathematically
             f1_pose = pose_gen.generate(
@@ -167,13 +167,15 @@ def process_video(
             hit2 = hit_detect.check(f2_state, f2_pose, f1_state, f1_pose, fi)
 
             if hit1:
-                f2_ctrl.apply_knockback(-f1_state.facing, 6.0)
+                kb_dir = 1 if f2_state.x > f1_state.x else -1
+                f2_ctrl.apply_knockback(kb_dir, 8.0)
                 sx, sy = int(f2_pose.l_hip[0]), int(f2_pose.l_hip[1])
                 effects.trigger_punch(sx, sy)
                 effects.trigger_blood(sx, sy, 5)
 
             if hit2:
-                f1_ctrl.apply_knockback(-f2_state.facing, 6.0)
+                kb_dir = 1 if f1_state.x > f2_state.x else -1
+                f1_ctrl.apply_knockback(kb_dir, 8.0)
                 sx, sy = int(f1_pose.l_hip[0]), int(f1_pose.l_hip[1])
                 effects.trigger_punch(sx, sy)
                 effects.trigger_blood(sx, sy, 5)
