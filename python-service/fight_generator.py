@@ -155,7 +155,7 @@ def generate_fight(
             f2_state.current_action,
             f2_state.action_progress,
             f2_state.x,
-            f2_state.y, 
+            f2_state.y,
             f2_state.facing,
             fi,
         )
@@ -168,9 +168,25 @@ def generate_fight(
         hit1 = hit_detect.check(f1_state, f1_pose, f2_state, f2_pose, fi)
         hit2 = hit_detect.check(f2_state, f2_pose, f1_state, f1_pose, fi)
 
+        # Resolve priority ONLY if both hit
+        a1 = ACTIONS[f1_state.current_action]
+        a2 = ACTIONS[f2_state.current_action]
+
+        if hit1 and hit2:
+            if a1.priority > a2.priority:
+                hit2 = False
+            elif a2.priority > a1.priority:
+                hit1 = False
+            else:
+                hit1 = False
+                hit2 = False
+
+        # Apply hit1
         if hit1:
-            kb_dir = 1 if f2_state.x > f1_state.x else -1
-            _HIT_TYPE_MAP = {
+            dx = f2_state.x - f1_state.x
+            kb_dir = 1 if dx >= 0 else -1
+
+            hit_type = {
                 ActionType.UPPERCUT: "uppercut",
                 ActionType.JUMP_KICK: "jump_kick",
                 ActionType.KICK_LEFT: "kick",
@@ -178,19 +194,50 @@ def generate_fight(
                 ActionType.SWEEP_KICK: "sweep",
                 ActionType.PUNCH_LEFT: "punch",
                 ActionType.PUNCH_RIGHT: "punch",
-            }
-            hit_type = _HIT_TYPE_MAP.get(f1_state.current_action, "default")
+            }.get(f1_state.current_action, "default")
+
             f2_ctrl.apply_knockback(kb_dir, 9.0, hit_type=hit_type)
-            strike_pt = f2_pose.l_hip
+
+        strike_pt = hit_detect._get_strike_point(f1_state.current_action, f1_pose)
+        if strike_pt:
             effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
             effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
 
+        # Apply hit2
         if hit2:
-            kb_dir = 1 if f1_state.x > f2_state.x else -1
+            dx = f1_state.x - f2_state.x
+            kb_dir = 1 if dx >= 0 else -1
+
             f1_ctrl.apply_knockback(kb_dir, 9.0)
-            strike_pt = f1_pose.l_hip
-            effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
-            effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
+
+            strike_pt = hit_detect._get_strike_point(f2_state.current_action, f2_pose)
+            if strike_pt:
+                effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
+                effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
+
+        # if hit1:
+        #     kb_dir = 1 if f2_state.x > f1_state.x else -1
+        #     _HIT_TYPE_MAP = {
+        #         ActionType.UPPERCUT: "uppercut",
+        #         ActionType.JUMP_KICK: "jump_kick",
+        #         ActionType.KICK_LEFT: "kick",
+        #         ActionType.KICK_RIGHT: "kick",
+        #         ActionType.SWEEP_KICK: "sweep",
+        #         ActionType.PUNCH_LEFT: "punch",
+        #         ActionType.PUNCH_RIGHT: "punch",
+        #     }
+        #     hit_type = _HIT_TYPE_MAP.get(f1_state.current_action, "default")
+        #     f2_ctrl.apply_knockback(kb_dir, 9.0, hit_type=hit_type)
+        #     strike_pt = f2_pose.l_hip
+        #     effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
+        #     effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
+
+        # if hit2:
+        #     kb_dir = 1 if f1_state.x > f2_state.x else -1
+        #     f1_ctrl.apply_knockback(kb_dir, 9.0)
+        #     strike_pt = f1_pose.l_hip
+        #     effects.trigger_punch(int(strike_pt[0]), int(strike_pt[1]))
+        #     effects.trigger_blood(int(strike_pt[0]), int(strike_pt[1]), 6)
 
         # ── Render frame ──────────────────────────────────────────────────────
         frame = np.zeros((h, w, 3), dtype=np.uint8)

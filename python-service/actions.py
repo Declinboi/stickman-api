@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 from motion_curves import (
@@ -8,9 +8,6 @@ from motion_curves import (
     knockback_curve,
     ease_in_out,
     ease_out,
-    anticipation_curve,
-    lerp,
-    clamp,
 )
 
 
@@ -37,114 +34,116 @@ class ActionDef:
     action_type: ActionType
     duration_frames: int
     can_interrupt: bool = True
-    hit_frame: int | None = None
+
+    # 🔥 NEW: hit window instead of single frame
+    hit_start: int | None = None
+    hit_end: int | None = None
+
     hit_reach: float = 0.0
+
+    # 🔥 NEW: priority system
+    priority: int = 0
+
     curve: Callable[[float], float] = ease_in_out
 
 
 ACTIONS: dict[ActionType, ActionDef] = {
-    ActionType.IDLE: ActionDef(
-        ActionType.IDLE,
-        duration_frames=999,
-        can_interrupt=True,
-        curve=ease_in_out,
-    ),
-    ActionType.WALK: ActionDef(
-        ActionType.WALK,
-        duration_frames=8,  # was 24 — snappier steps
-        can_interrupt=True,
-        curve=ease_in_out,
-    ),
+    ActionType.IDLE: ActionDef(ActionType.IDLE, 999),
+    ActionType.WALK: ActionDef(ActionType.WALK, 8),
+    # 🥊 Punches (fast, low priority)
     ActionType.PUNCH_LEFT: ActionDef(
         ActionType.PUNCH_LEFT,
-        duration_frames=10,  # was 18 — lightning jab
+        duration_frames=12,
         can_interrupt=False,
-        hit_frame=5,  # was 9
-        hit_reach=150.0,
+        hit_start=4,
+        hit_end=7,
+        hit_reach=110.0,
+        priority=1,
         curve=punch_curve,
     ),
     ActionType.PUNCH_RIGHT: ActionDef(
         ActionType.PUNCH_RIGHT,
-        duration_frames=10,
+        duration_frames=12,
         can_interrupt=False,
-        hit_frame=5,
-        hit_reach=150.0,
+        hit_start=4,
+        hit_end=7,
+        hit_reach=110.0,
+        priority=1,
         curve=punch_curve,
     ),
+    # 🦵 Kicks (medium)
     ActionType.KICK_LEFT: ActionDef(
         ActionType.KICK_LEFT,
-        duration_frames=16,  # was 26
+        duration_frames=18,
         can_interrupt=False,
-        hit_frame=8,  # was 13
-        hit_reach=190.0,
+        hit_start=7,
+        hit_end=11,
+        hit_reach=140.0,
+        priority=2,
         curve=kick_curve,
     ),
     ActionType.KICK_RIGHT: ActionDef(
         ActionType.KICK_RIGHT,
-        duration_frames=16,
+        duration_frames=18,
         can_interrupt=False,
-        hit_frame=8,
-        hit_reach=190.0,
+        hit_start=7,
+        hit_end=11,
+        hit_reach=140.0,
+        priority=2,
         curve=kick_curve,
     ),
     ActionType.BLOCK: ActionDef(
         ActionType.BLOCK,
-        duration_frames=18,  # was 30
+        duration_frames=18,
         can_interrupt=True,
+        priority=3,  # defensive priority
         curve=block_curve,
     ),
     ActionType.KNOCKBACK: ActionDef(
         ActionType.KNOCKBACK,
-        duration_frames=14,  # was 22
+        duration_frames=16,
         can_interrupt=False,
         curve=knockback_curve,
     ),
+    # 💥 Heavy attacks
     ActionType.JUMP_KICK: ActionDef(
         ActionType.JUMP_KICK,
-        duration_frames=28,  # was 36 — still needs time for arc
+        duration_frames=30,
         can_interrupt=False,
-        hit_frame=14,  # was 18
-        hit_reach=220.0,
+        hit_start=12,
+        hit_end=18,
+        hit_reach=170.0,
+        priority=4,
         curve=kick_curve,
     ),
     ActionType.UPPERCUT: ActionDef(
         ActionType.UPPERCUT,
-        duration_frames=12,  # was 20
+        duration_frames=14,
         can_interrupt=False,
-        hit_frame=6,  # was 10
-        hit_reach=130.0,
+        hit_start=5,
+        hit_end=9,
+        hit_reach=120.0,
+        priority=5,
         curve=punch_curve,
     ),
     ActionType.SWEEP_KICK: ActionDef(
         ActionType.SWEEP_KICK,
-        duration_frames=18,  # was 28
+        duration_frames=20,
         can_interrupt=False,
-        hit_frame=9,  # was 14
-        hit_reach=170.0,
+        hit_start=8,
+        hit_end=13,
+        hit_reach=130.0,
+        priority=3,
         curve=kick_curve,
     ),
     ActionType.DODGE: ActionDef(
         ActionType.DODGE,
-        duration_frames=10,  # was 16 — instant dash
+        duration_frames=10,
         can_interrupt=False,
+        priority=6,  # dodge overrides attacks
         curve=ease_out,
     ),
-    ActionType.TAUNT: ActionDef(
-        ActionType.TAUNT,
-        duration_frames=28,  # was 40
-        can_interrupt=True,
-        curve=ease_in_out,
-    ),
-    ActionType.FALL: ActionDef(
-        ActionType.FALL,
-        duration_frames=22,  # keep slow for dramatic effect
-        can_interrupt=False,
-        curve=ease_out,
-    ),
-    ActionType.GETUP: ActionDef(
-        ActionType.GETUP,
-        duration_frames=28,  # was 36
-        can_interrupt=False,
-        curve=ease_in_out,
-    ),
+    ActionType.TAUNT: ActionDef(ActionType.TAUNT, 28),
+    ActionType.FALL: ActionDef(ActionType.FALL, 22, can_interrupt=False),
+    ActionType.GETUP: ActionDef(ActionType.GETUP, 28, can_interrupt=False),
 }

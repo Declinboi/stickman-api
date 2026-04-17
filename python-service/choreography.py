@@ -47,6 +47,10 @@ _KEYWORD_MAP: dict[str, ActionType] = {
     # Misc
     "taunt": ActionType.TAUNT,
     "idle": ActionType.IDLE,
+    # Add this
+    "fall": ActionType.FALL,
+    "getup": ActionType.GETUP,
+    "knockback": ActionType.KNOCKBACK,
 }
 
 # Phrases that identify which fighter is acting
@@ -56,7 +60,7 @@ _F1_PATTERNS = [
     r"\bplayer\s*1\b",
     r"\bp1\b",
     r"\bfirst\b",
-    r"\bleft\b",
+    # r"\bleft\b",
 ]
 _F2_PATTERNS = [
     r"\bf(?:ighter)?\s*2\b",
@@ -64,19 +68,19 @@ _F2_PATTERNS = [
     r"\bplayer\s*2\b",
     r"\bp2\b",
     r"\bsecond\b",
-    r"\bright\b",
+    # r"\bright\b",
 ]
 
 
 def _detect_fighter(sentence: str) -> int | None:
-    """Return 1, 2, or None if no fighter is identified."""
     s = sentence.lower()
-    for pat in _F1_PATTERNS:
-        if re.search(pat, s):
-            return 1
-    for pat in _F2_PATTERNS:
-        if re.search(pat, s):
-            return 2
+
+    if re.search(r"\bf(?:ighter)?\s*1\b|\bp1\b|\bplayer\s*1\b", s):
+        return 1
+
+    if re.search(r"\bf(?:ighter)?\s*2\b|\bp2\b|\bplayer\s*2\b", s):
+        return 2
+
     return None
 
 
@@ -118,15 +122,18 @@ class Choreographer:
             action = _detect_action(sent)
 
             if action is None:
+                logger.warning(f"Skipped (no action): {sent}")
                 continue
 
             if fighter_id is None:
+                logger.warning(f"No fighter detected, auto-assigning: {sent}")
                 # Ambiguous — alternate between fighters
                 fighter_id = 1 if (len(timeline) % 2 == 0) else 2
 
             from actions import ACTIONS
 
             action_def = ACTIONS[action]
+
             start_frame = clock[fighter_id]
 
             timeline.append(
